@@ -18,10 +18,14 @@ from torch.utils.cpp_extension import load
 print("Compiling CUDA code... (This might take 1-2 minutes the very first time!)")
 
 # 1. Compile and load the custom CUDA extension
+# 1. Compile and load the custom CUDA extension
 dummy_module = load(
     name="dummy_ext",
     sources=["dummy.cu"],
-    verbose=True # Shows the compilation logs
+    verbose=True,
+    extra_cflags=['/Zc:preprocessor'],
+    # Add this line to hide warning 3189:
+    extra_cuda_cflags=['-Xcompiler', '/Zc:preprocessor', '-diag-suppress', '3189']
 )
 
 print("Compilation successful!\n")
@@ -43,6 +47,6 @@ print(f"Result Tensor (CPU):   {result_cpu}")
 
 # If the result is [2., 4., 6., 8., 10.], YOU DID IT!
 if torch.allclose(result_cpu, cpu_tensor * 2):
-    print("\n✅ DAY 2 COMPLETE: The Bridge is working perfectly!")
+    print("\nThe Bridge is working perfectly!")
 else:
-    print("\n❌ Something went wrong with the math.")
+    print("\nSomething went wrong with the math.")
