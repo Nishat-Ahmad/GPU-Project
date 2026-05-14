@@ -55,20 +55,6 @@ torch::Tensor weighted_mean_pooling(torch::Tensor input, torch::Tensor weights) 
     return output;
 }
 
-torch::Tensor bias_add(torch::Tensor input, torch::Tensor bias) {
-    input = ensure_float_cuda(input, "input");
-    bias = ensure_float_cuda(bias, "bias");
-    auto output = torch::empty_like(input);
-    launch_bias_add(input.data_ptr<float>(), bias.data_ptr<float>(), output.data_ptr<float>(), input.size(0), input.size(1));
-    return output;
-}
-
-torch::Tensor leaky_relu(torch::Tensor input, float alpha) {
-    input = ensure_float_cuda(input, "input");
-    auto output = torch::empty_like(input);
-    launch_leaky_relu(input.data_ptr<float>(), output.data_ptr<float>(), input.numel(), alpha);
-    return output;
-}
 
 torch::Tensor batchnorm_mean(torch::Tensor input) {
     input = ensure_float_cuda(input, "input");
@@ -108,27 +94,6 @@ torch::Tensor logit_projection(torch::Tensor input, torch::Tensor weights) {
     return output;
 }
 
-torch::Tensor softmax_row_max(torch::Tensor input) {
-    input = ensure_float_cuda(input, "input");
-    auto row_max = torch::empty({input.size(0)}, torch::TensorOptions().device(input.device()));
-    launch_softmax_row_max(input.data_ptr<float>(), row_max.data_ptr<float>(), input.size(0), input.size(1));
-    return row_max;
-}
-
-torch::Tensor softmax_row_sum(torch::Tensor input, torch::Tensor row_max) {
-    input = ensure_float_cuda(input, "input");
-    row_max = ensure_float_cuda(row_max, "row_max");
-    auto row_sum = torch::empty({input.size(0)}, torch::TensorOptions().device(input.device()));
-    launch_softmax_row_sum(input.data_ptr<float>(), row_max.data_ptr<float>(), row_sum.data_ptr<float>(), input.size(0), input.size(1));
-    return row_sum;
-}
-
-torch::Tensor softmax_normalize(torch::Tensor input, torch::Tensor row_max, torch::Tensor row_sum) {
-    input = ensure_float_cuda(input, "input");
-    auto output = torch::empty_like(input);
-    launch_softmax_normalize(input.data_ptr<float>(), row_max.data_ptr<float>(), row_sum.data_ptr<float>(), output.data_ptr<float>(), input.size(0), input.size(1));
-    return output;
-}
 
 torch::Tensor argmax(torch::Tensor input) {
     input = ensure_float_cuda(input, "input");
@@ -151,8 +116,6 @@ torch::Tensor fused_softmax(torch::Tensor input) {
     launch_fused_softmax(input.data_ptr<float>(), output.data_ptr<float>(), input.size(0), input.size(1));
     return output;
 }
-
-
 
 torch::Tensor gemm_cublas(torch::Tensor A, torch::Tensor B) {
     auto M = A.size(0);
@@ -177,8 +140,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("embedding_lookup", &embedding_lookup);
     m.def("positional_encoding", &positional_encoding);
     m.def("weighted_mean_pooling", &weighted_mean_pooling);
-    m.def("bias_add", &bias_add);
-    m.def("leaky_relu", &leaky_relu);
     m.def("batchnorm_mean", &batchnorm_mean);
     m.def("batchnorm_var", &batchnorm_var);
     m.def("batchnorm_apply", &batchnorm_apply);
@@ -186,9 +147,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("gemm_cublas", &gemm_cublas);
     m.def("gemm_custom", &gemm_custom);
     m.def("logit_projection", &logit_projection);
-    m.def("softmax_row_max", &softmax_row_max);
-    m.def("softmax_row_sum", &softmax_row_sum);
-    m.def("softmax_normalize", &softmax_normalize);
     m.def("argmax", &argmax);
     m.def("fused_bias_leaky_relu", &fused_bias_leaky_relu);
     m.def("fused_softmax", &fused_softmax);

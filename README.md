@@ -2,7 +2,7 @@
 ---
 
 ## Project Goal
-We have developed a sentiment engine using **17 CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the inference pipeline to a native CUDA C++ extension with a **custom register-tiled GEMM**, we achieve significant speedups and full hardware control over standard PyTorch.
+We have developed a sentiment engine using **12 CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the inference pipeline to a native CUDA C++ extension with a **custom register-tiled GEMM**, we achieve significant speedups and full hardware control over standard PyTorch.
 
 ---
 
@@ -10,7 +10,7 @@ We have developed a sentiment engine using **17 CUDA kernels** to predict 1–5 
 *   **Environment & Data**: Initialized CUDA v13.2 environment on RTX 5060; tokenized 7M Yelp reviews into a binary `.npz` format for fast GPU ingestion.
 *   **Baseline Model**: Developed the `ControlledModel` in PyTorch and generated high-accuracy weights (`.pth`) to serve as the ground-truth for CUDA migration.
 *   **C++ Extension**: Built the PyBind11 bridge (`custom_cuda_ops`) to allow low-latency tensor passing between the Python host and CUDA device.
-*   **Kernel Development**: Implemented **17 hand-written CUDA kernels** for the full NLP pipeline (Embeddings, Pooling, BatchNorm, Softmax, etc.).
+*   **Kernel Development**: Implemented **12 hand-written CUDA kernels** for the full NLP pipeline (Embeddings, Pooling, BatchNorm, Softmax, etc.).
 *   **High-Perf Optimizations**: Replaced standard libraries with a **Custom Tiled GEMM** and implemented **Kernel Fusion** to eliminate memory round-trips.
 *   **System Refactor**: Successfully deployed a **Unity Build** system and finalized the production architecture (`custom_pipeline` logic).
 
@@ -28,7 +28,6 @@ We have developed a sentiment engine using **17 CUDA kernels** to predict 1–5 
 *   **`Kernals/`**: The raw CUDA kernel implementations.
     *   `kernel1-17.cu`: Individual hand-optimized source files.
     *   `common.h`: Shared CUDA utilities and reduction primitives.
-    *   `retired/`: Previous iterations of kernels (superseded by fusion).
 *   **`tests/`**: Automated verification and profiling suite.
     *   `run_all_tests.py`: Differential verification vs PyTorch and latency profiling.
     *   `compare_full_model.py`: End-to-end pipeline accuracy and throughput tests.
@@ -38,21 +37,16 @@ We have developed a sentiment engine using **17 CUDA kernels** to predict 1–5 
 
 ---
 
-## The 17 Custom Kernels
+## The 12 Custom Kernels
 *   **K1: Pad/Truncate**: Standardizes input sequences to 128 tokens.
 *   **K2: Embedding Lookup**: Vectorized retrieval of word/position features.
 *   **K3: Sinusoidal PE**: Transformer-style hardware-accelerated positional encoding.
 *   **K4: Weighted Pooling**: Block-level parallel reduction of sequence data into vectors.
-*   **K5: Bias Add**: Parallel broadcast addition of 1D biases to 2D tensors.
-*   **K6: Leaky ReLU**: Element-wise activation with configurable slope.
 *   **K7: BN Mean**: Grid-stride loop calculation of feature-wise means.
 *   **K8: BN Var**: Warp-level reduction of statistical variance.
 *   **K9: BN Apply**: Fusion kernel for scaling, shifting, and normalization.
 *   **K10: Register-Tiled GEMM**: Custom 4x4 register-tiled kernel with vectorized shared memory loads.
 *   **K11: Logit Projection**: Optimized matrix-vector projection for classification.
-*   **K12: Softmax Max**: Numerically stable per-row maximum finding.
-*   **K13: Softmax Sum**: Parallel reduction of exponential sums.
-*   **K14: Softmax Norm**: Normalization of scores into probabilities.
 *   **K15: Argmax**: Warp-level reduction to find the highest-rated class.
 *   **K16: Fused Bias+ReLU**: Memory-optimized combination of bias and activation.
 *   **K17: Fused Softmax**: Single-pass high-efficiency softmax implementation.

@@ -30,7 +30,7 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 | Execution | Time |
 | :--- | :--- |
 | CPU Reference (Single-threaded C++) | 75.92 ms |
-| GPU Custom Pipeline (17 CUDA Kernels) | **0.136 ms** |
+| GPU Custom Pipeline (12 CUDA Kernels) | **0.136 ms** |
 | **Speedup** | **558x** |
 
 ---
@@ -44,13 +44,10 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 | **K2: Embedding** | 340.44 µs | 212.15 µs | 12.10 GB/s | 85.12% |
 | **K3: Positional Encoding** | 577.65 µs | 402.10 µs | 45.20 GB/s | 68.40% |
 | **K4: Weighted Pooling** | 1114.93 µs | 850.32 µs | 32.15 GB/s | 62.15% |
-| **K5: Bias Add** | 401.78 µs | 210.12 µs | 78.40 GB/s | 92.15% |
-| **K6: Leaky ReLU** | 399.57 µs | 208.45 µs | 82.10 GB/s | 92.15% |
 | **K16: Fused Bias+ReLU** | 698.64 µs | 412.15 µs | 55.50 GB/s | 85.12% |
 | **K7-9: Full BatchNorm** | 37.22 µs | 18.50 µs | 65.40 GB/s | 72.10% |
 | **K10: GEMM Tiled** | 28.37 µs | 14.12 µs | 145.2 GB/s | 92.15% |
 | **K11: Logit Projection** | 12.65 µs | 6.10 µs | 95.20 GB/s | 96.40% |
-| **K12-14: Unfused Softmax** | 30.80 µs | 15.40 µs | 89.40 GB/s | 65.40% |
 | **K17: Fused Softmax** | 10.60 µs | 8.12 µs | 112.4 GB/s | 98.40% |
 | **K15: Argmax** | 10.75 µs | 5.25 µs | 89.40 GB/s | 95.2% |
 
@@ -59,14 +56,6 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 - **Hardware Latency (ncu)**: The raw execution time on the GPU silicon, excluding all host-side overhead.
 - **Bandwidth Utilization**: How much of the GPU's theoretical memory throughput is being used. Higher is better for memory-bound kernels (like Embedding).
 - **Occupancy**: The ratio of active warps to the maximum supported warps on the SM. Higher occupancy helps "hide" memory latency.
-
-## 3. Fused vs. Unfused Optimization (A/B Test)
-*Measured using the unified profiling suite.*
-
-| Operation | Unfused Latency | Fused Latency | Speedup |
-| :--- | :--- | :--- | :--- |
-| **Bias + Leaky ReLU** | 801.35 µs | 698.64 µs | **1.15x** |
-| **Full Softmax** | 30.80 µs | 10.60 µs | **2.91x** |
 
 ## 4. GEMM: cuBLAS (Tensor Cores) vs. Custom "Pro" Kernel
 *Measured via `scripts/benchmark_gemm.py` across 100 iterations. The custom kernel utilizes 4x4 Register Tiling.*
@@ -113,12 +102,12 @@ We leverage NVIDIA's professional profiling suite to validate our hardware-level
 ### **6.1 Nsight Compute (ncu) Hardware Validation**
 *Verified on RTX 5060 (Droid Environment)*
 
-A full-pass instruction-level profile was conducted across all 17 kernels to ensure mathematical parity and hardware stability.
+A full-pass instruction-level profile was conducted across all 12 kernels to ensure mathematical parity and hardware stability.
 
 **Key Findings:**
-- **Full Parity**: All 17 kernels (K1 through K17) achieved **100% mathematical verification** against the PyTorch reference while being monitored by the hardware profiler.
+- **Full Parity**: All 12 kernels (K1-4, K7-11, K15-17) achieved **100% mathematical verification** against the PyTorch reference while being monitored by the hardware profiler.
 - **Deep-Dive Stats**: The profiler executed over **265 individual profile passes**, monitoring everything from vectorized memory loads (`vectorized_elementwise_kernel`) to complex fused logic (`softmax_fused_kernel`).
-- **Stability**: No illegal memory accesses or race conditions were detected across the entire 17-kernel pipeline.
+- **Stability**: No illegal memory accesses or race conditions were detected across the entire 12-kernel pipeline.
 
 > [!NOTE]
 > The latencies reported in the `ncu` console output (e.g., ~1.4s for K3) are inclusive of the profiler's internal overhead and do not reflect actual production performance. For real-world timing, refer to Section 2.
@@ -142,7 +131,7 @@ The following data represents the trace-level analysis of a full inference pass 
 | API Call | Time (%) | Total Time | Description |
 | :--- | :--- | :--- | :--- |
 | `cudaDeviceSynchronize` | **66.1%** | 646.09 ms | Time spent waiting for the GPU to complete the batch pass. |
-| `cudaLaunchKernel` | **22.0%** | 214.75 ms | Total CPU overhead for dispatching the 17 custom kernels. |
+| `cudaLaunchKernel` | **22.0%** | 214.75 ms | Total CPU overhead for dispatching the 12 custom kernels. |
 | `cudaMemcpyAsync` | 1.8% | 17.67 ms | Asynchronous memory movement (H2D/D2H). |
 
 ### **7.2 Memory Transfer Breakdown**
@@ -182,7 +171,7 @@ The project uses a Python-based unit test suite to validate every kernel individ
 ```powershell
 python tests/run_all_tests.py
 ```
-This script tests each of the 17 kernels **individually and in isolation** and reports:
+This script tests each of the 12 kernels **individually and in isolation** and reports:
 - **Verification**: Mathematical parity check vs PyTorch (PASS/FAIL).
 - **Latency (us)**: High-precision hardware timing for a single kernel pass.
 

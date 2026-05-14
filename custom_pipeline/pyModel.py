@@ -57,9 +57,9 @@ class ControlledModel(nn.Module):
             # K10: Tiled GEMM
             hidden = custom_cuda_ops.gemm_tiled(bn_out.contiguous(), self.fc1.weight.data.t().contiguous())
             
-            # K11: Projection + Bias
+            # K11: Projection (bias added on the PyTorch side)
             logits = custom_cuda_ops.logit_projection(hidden.contiguous(), self.fc2.weight.data.t().contiguous())
-            logits = custom_cuda_ops.bias_add(logits, self.fc2.bias.data)
+            logits = logits + self.fc2.bias.data
             
             # K17: Fused Softmax
             probs = custom_cuda_ops.fused_softmax(logits.contiguous())

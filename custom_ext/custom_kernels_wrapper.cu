@@ -11,16 +11,11 @@
 #include "kernel2_embedding_lookup.cu"
 #include "kernel3_positional_encoding.cu"
 #include "kernel4_weighted_mean_pooling.cu"
-#include "retired/kernel5_bias_add.cu"
-#include "retired/kernel6_leaky_relu.cu"
 #include "kernel7_batchnorm_mean.cu"
 #include "kernel8_batchnorm_var.cu"
 #include "kernel9_batchnorm_apply.cu"
 #include "kernel10_gemm_tiled.cu"
 #include "kernel11_logit_projection.cu"
-#include "retired/kernel12_softmax_row_max.cu"
-#include "retired/kernel13_softmax_row_sum.cu"
-#include "retired/kernel14_softmax_normalize.cu"
 #include "kernel15_argmax.cu"
 #include "kernel16_fused_bias_relu.cu"
 #include "kernel17_fused_softmax.cu"
@@ -77,17 +72,6 @@ void launch_weighted_mean_pooling(const float* input, const float* weights, floa
     weighted_mean_pooling_kernel<<<grid, threads, shared_mem>>>(input, weights, output, batch, seq_len, dim);
 }
 
-void launch_bias_add(const float* input, const float* bias, float* output, int rows, int cols) {
-    const int threads = 256;
-    int blocks = (rows * cols + threads - 1) / threads;
-    bias_add_kernel<<<blocks, threads>>>(input, bias, output, rows, cols);
-}
-
-void launch_leaky_relu(const float* input, float* output, int total, float alpha) {
-    const int threads = 256;
-    int blocks = (total + threads - 1) / threads;
-    leaky_relu_kernel<<<blocks, threads>>>(input, output, total, alpha);
-}
 
 void launch_batchnorm_mean(const float* input, float* mean, int batch, int features) {
     batchnorm_mean_kernel<<<features, 256>>>(input, mean, batch, features);
@@ -127,19 +111,6 @@ void launch_logit_projection(const float* input, const float* weight, float* out
     logit_projection_kernel<<<batch, threads>>>(input, weight, output, batch, hidden, classes);
 }
 
-void launch_softmax_row_max(const float* input, float* output, int batch, int classes) {
-    softmax_row_max_kernel<<<batch, 32>>>(input, output, batch, classes);
-}
-
-void launch_softmax_row_sum(const float* input, const float* row_max, float* output, int batch, int classes) {
-    softmax_row_sum_kernel<<<batch, 32>>>(input, row_max, output, batch, classes);
-}
-
-void launch_softmax_normalize(const float* input, const float* row_max, const float* row_sum, float* output, int batch, int classes) {
-    const int threads = 256;
-    int blocks = (batch * classes + threads - 1) / threads;
-    softmax_normalize_kernel<<<blocks, threads>>>(input, row_max, row_sum, output, batch, classes);
-}
 
 void launch_argmax(const float* input, int* output, int batch, int classes) {
     argmax_kernel<<<batch, 32>>>(input, output, batch, classes);

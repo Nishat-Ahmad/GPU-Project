@@ -29,7 +29,6 @@ if sys.platform == 'win32':
 import custom_cuda_ops
 import torch.utils.benchmark as benchmark
 import math
-import numpy as np
 
 def run_test(name, verify_func=None, bench_args_func=None, rtol=1e-3, atol=1e-5):
     print(f"--- {name} ---")
@@ -86,18 +85,6 @@ def verify_embedding_lookup():
     expected = torch.nn.functional.embedding(tokens, emb_weight).view(-1, dim)
     return expected, custom_out
 
-def verify_bias_add():
-    rows, cols = 128, 64
-    x = torch.randn(rows, cols).cuda()
-    bias = torch.randn(cols).cuda()
-    custom_out = custom_cuda_ops.bias_add(x, bias)
-    return x + bias, custom_out
-
-def verify_leaky_relu():
-    x = torch.randn(1024).cuda()
-    alpha = 0.01
-    custom_out = custom_cuda_ops.leaky_relu(x, alpha)
-    return torch.nn.functional.leaky_relu(x, alpha), custom_out
 
 def verify_gemm():
     M, K, N = 128, 64, 128
@@ -106,13 +93,6 @@ def verify_gemm():
     custom_out = custom_cuda_ops.gemm_tiled(A, B)
     return torch.matmul(A, B), custom_out
 
-def verify_softmax():
-    batch, classes = 128, 10
-    x = torch.randn(batch, classes).cuda()
-    row_max = custom_cuda_ops.softmax_row_max(x)
-    row_sum = custom_cuda_ops.softmax_row_sum(x, row_max)
-    custom_out = custom_cuda_ops.softmax_normalize(x, row_max, row_sum)
-    return torch.nn.functional.softmax(x, dim=-1), custom_out
 
 def verify_argmax():
     batch, classes = 128, 10
@@ -204,15 +184,6 @@ def bench_weighted_mean_pooling():
     w = torch.randn(batch, seq_len).cuda()
     return custom_cuda_ops.weighted_mean_pooling, x, w
 
-def bench_bias_add():
-    rows, cols = 2048 * 128, 64
-    x = torch.randn(rows, cols).cuda()
-    b = torch.randn(cols).cuda()
-    return custom_cuda_ops.bias_add, x, b
-
-def bench_leaky_relu():
-    x = torch.randn(2048 * 128, 64).cuda()
-    return custom_cuda_ops.leaky_relu, x, 0.01
 
 def bench_fused_bias_relu():
     rows, cols = 2048 * 128, 64
@@ -243,14 +214,6 @@ def bench_logit_projection():
     w = torch.randn(hidden, classes).cuda()
     return custom_cuda_ops.logit_projection, x, w
 
-def bench_softmax_unfused():
-    batch, classes = 2048, 5
-    x = torch.randn(batch, classes).cuda()
-    def full_softmax(x):
-        row_max = custom_cuda_ops.softmax_row_max(x)
-        row_sum = custom_cuda_ops.softmax_row_sum(x, row_max)
-        return custom_cuda_ops.softmax_normalize(x, row_max, row_sum)
-    return full_softmax, x
 
 def bench_softmax_fused():
     batch, classes = 2048, 5
@@ -270,13 +233,10 @@ if __name__ == "__main__":
     run_test("K2: Embedding", verify_embedding_lookup, bench_embedding_lookup)
     run_test("K3: Positional Encoding", verify_positional_encoding, bench_positional_encoding, atol=2e-4)
     run_test("K4: Weighted Pooling", verify_weighted_mean_pooling, bench_weighted_mean_pooling)
-    run_test("K5: Bias Add", verify_bias_add, bench_bias_add)
-    run_test("K6: Leaky ReLU", verify_leaky_relu, bench_leaky_relu)
     run_test("K16: Fused Bias+ReLU", verify_fused_bias_relu, bench_fused_bias_relu)
     run_test("K7-9: Full BatchNorm", verify_batchnorm_full, bench_batchnorm_full)
     run_test("K10: GEMM Tiled", verify_gemm, bench_gemm)
     run_test("K11: Logit Projection", verify_logit_projection, bench_logit_projection)
-    run_test("K12-14: Unfused Softmax", verify_softmax, bench_softmax_unfused)
     run_test("K17: Fused Softmax", verify_softmax_fused, bench_softmax_fused)
     run_test("K15: Argmax", verify_argmax, bench_argmax)
     print("==========================================")

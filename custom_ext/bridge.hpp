@@ -19,10 +19,6 @@ void launch_positional_encoding(const float* input, float* output,
 void launch_weighted_mean_pooling(const float* input, const float* weights,
                                    float* output, int batch, int seq_len, int dim);
 
-void launch_bias_add(const float* input, const float* bias,
-                      float* output, int rows, int cols);
-
-void launch_leaky_relu(const float* input, float* output, int total, float alpha);
 
 void launch_batchnorm_mean(const float* input, float* mean, int batch, int features);
 
@@ -41,15 +37,6 @@ void launch_gemm_custom(const float* A, const float* B, float* C, int M, int K, 
 void launch_logit_projection(const float* input, const float* weights,
                                float* output, int batch, int hidden, int classes);
 
-void launch_softmax_row_max(const float* input, float* row_max,
-                              int batch, int classes);
-
-void launch_softmax_row_sum(const float* input, const float* row_max,
-                              float* row_sum, int batch, int classes);
-
-void launch_softmax_normalize(const float* input, const float* row_max,
-                                const float* row_sum, float* output,
-                                int batch, int classes);
 
 void launch_argmax(const float* input, int* output, int batch, int classes);
 

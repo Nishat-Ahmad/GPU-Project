@@ -43,5 +43,3 @@ __global__ void weighted_mean_pooling_kernel(const float* __restrict__ input,
         output[sentence * dim + d] = (denom > 0.0f) ? (shared_val[0] / denom) : 0.0f;
     }
 }
-
-

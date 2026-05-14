@@ -35,5 +35,3 @@ __global__ void embedding_lookup_kernel(const int* __restrict__ tokens,
         }
     }
 }
-
-
