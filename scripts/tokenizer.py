@@ -17,11 +17,13 @@ class SimpleTokenizer:
         """Builds the vocabulary dictionary from a list of sentences."""
         word_counts = {}
         for text in texts:
+            # Break each review into normalized words and count how often each one appears.
             words = self.clean_text(text).split()
             for word in words:
                 word_counts[word] = word_counts.get(word, 0) + 1
                 
         for word, count in word_counts.items():
+            # Keep only words that are frequent enough to be useful and assign them the next ID.
             if count >= min_freq and word not in self.word2id:
                 self.word2id[word] = self.vocab_size
                 self.id2word[self.vocab_size] = word
@@ -40,6 +42,7 @@ class SimpleTokenizer:
             
         # Pad with <PAD> (0) if too short
         while len(token_ids) < max_length:
+            # Extend the sequence to a fixed length so every review has the same shape.
             token_ids.append(self.word2id["<PAD>"])
             
         return token_ids

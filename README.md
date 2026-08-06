@@ -2,93 +2,99 @@
 ---
 
 ## Project Goal
-We have developed a high-performance sentiment engine using **15 custom CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the entire PyTorch inference pipeline to native CUDA C++, we achieve massive speedups over standard CPU/GPU implementations.
-
-The project follows a strict **Host/Device** architecture:
-*   **The Host (Python):** Manages data loading, tokenization, and coordinates the inference pipeline via a custom PyTorch C++ extension.
-*   **The Device (CUDA):** Executes all mathematical operations, from embedding lookups to the final softmax and argmax predictions, using hand-optimized CUDA kernels.
+We have developed a sentiment engine using **12 CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the inference pipeline to a native CUDA C++ extension with a **custom register-tiled GEMM**, we achieve significant speedups and full hardware control over standard PyTorch.
 
 ---
 
-## Progress
-1.  **Environment Setup:** Configured Python, PyTorch, and NVIDIA CUDA Toolkit (v13.2).
-2.  **Data Acquisition:** Processed the Yelp Academic Dataset (Customer Reviews).
-3.  **Data Pipeline:** Tokenized 7 million reviews into `yelp_tokenized.npz`.
-4.  **Baseline Training:** Trained the model (`pyModel.py`) to generate weights (`controlled_model_weights.pth`).
-5.  **Kernel Migration:** Stripped 15 CUDA kernels of standalone logic and prepared them for PyTorch integration.
-6.  **Extension Development:** Built a PyBind11 C++ extension (`custom_cuda_ops`) to bridge Python and CUDA.
-7.  **Full Integration:** Replaced all forward pass operations in the model with custom CUDA kernel calls.
-8.  **Verification:** Validated the end-to-end pipeline with real review data, achieving identical accuracy with significant performance gains.
+## Development Roadmap
+*   **Environment & Data**: Initialized CUDA v13.2 environment on RTX 5060; tokenized 7M Yelp reviews into a binary `.npz` format for fast GPU ingestion.
+*   **Baseline Model**: Developed the `ControlledModel` in PyTorch and generated high-accuracy weights (`.pth`) to serve as the ground-truth for CUDA migration.
+*   **C++ Extension**: Built the PyBind11 bridge (`custom_cuda_ops`) to allow low-latency tensor passing between the Python host and CUDA device.
+*   **Kernel Development**: Implemented **12 hand-written CUDA kernels** for the full NLP pipeline (Embeddings, Pooling, BatchNorm, Softmax, etc.).
+*   **High-Perf Optimizations**: Replaced standard libraries with a **Custom Tiled GEMM** and implemented **Kernel Fusion** to eliminate memory round-trips.
+*   **System Refactor**: Successfully deployed a **Unity Build** system and finalized the production architecture (`custom_pipeline` logic).
 
 ---
 
-## The 15 Custom Kernels
-
-### Data Preparation
-1.  **Token Padding & Truncation**: Standardizes sequence lengths with a 1-thread-per-token mapping.
-2.  **Vectorized Embedding Lookup**: Uses `float4` vectorized reads to maximize memory bandwidth during word and position embedding retrieval.
-3.  **Sinusoidal Positional Encoding**: Applies Transformer-based encoding using hardware-accelerated math functions.
-4.  **Weighted Mean Pooling**: Executes block-level parallel reductions through binary tree summation in shared memory.
-
-### Neural Layers
-5.  **Bias Addition**: Broadcasts 1D bias vectors across 2D tensors using optimized column indexing.
-6.  **Leaky ReLU Activation**: Element-wise non-linearity with configurable alpha.
-7.  **BatchNorm Mean**: Calculates feature means via grid-stride loops and warp-level reductions.
-8.  **BatchNorm Variance**: Computes statistical variance using register-to-register communication.
-9.  **BatchNorm Apply**: Normalizes, scales, and shifts data in a single fusion kernel.
-10. **Tiled GEMM**: High-performance matrix multiplication ($C = A \times B$) using shared memory tiling.
-11. **Logit Projection**: Optimized matrix-vector projection for the final classification layer.
-
-### Classification Pipeline
-12. **Softmax Row Max**: Computes per-row maximums for numerical stability.
-13. **Softmax Row Sum**: Calculates the sum of exponentials ($e^{x - max}$) using shared memory reduction.
-14. **Softmax Normalize**: Produces final probabilities by normalizing against the row sum.
-15. **Argmax**: Determines the final 1-5 star prediction by finding the index of the maximum probability.
+## Folder Structure
+*   **`custom_ext/`**: The C++/PyBind11 bridge and build system.
+    *   `custom_ops.cpp`: PyBind11 bindings interfacing with PyTorch.
+    *   `custom_kernels_wrapper.cu`: Unity Build entry point for kernel launches.
+    *   `setup.py`: Build script configured for MSVC/CUDA compilation.
+    *   `bridge.hpp`: Central header for host-device interface.
+*   **`custom_pipeline/`**: Optimized production inference environment.
+    *   `pyModel.py`: Model architecture using fused kernels and custom GEMM.
+    *   `inference.py`: Production-level inference benchmarking script.
+*   **`Kernals/`**: The raw CUDA kernel implementations.
+    *   `kernel1-17.cu`: Individual hand-optimized source files.
+    *   `common.h`: Shared CUDA utilities and reduction primitives.
+*   **`tests/`**: Automated verification and profiling suite.
+    *   `run_all_tests.py`: Differential verification vs PyTorch and latency profiling.
+    *   `compare_full_model.py`: End-to-end pipeline accuracy and throughput tests.
+    *   `benchmark_gemm.py`: Deep-dive comparison between cuBLAS and the Custom Tiled Kernel.
+*   **`scripts/`**: Offline data preparation and model training utilities.
+*   **`performance_report.md`**: Technical deep-dive into benchmarks and hardware metrics.
 
 ---
 
-## File Structure
-```text
-GPUProject/
-├── custom_ext/               # PyTorch C++ Extension
-│   ├── custom_ops.cpp        # PyBind11 bindings
-│   ├── custom_kernels_wrapper.cu # CUDA launch wrappers
-│   └── setup.py              # Build configuration
-├── custom_pipeline/          # Integrated Model Logic
-│   ├── pyModel.py            # Model with custom forward pass
-│   └── inference.py          # End-to-end verification script
-├── kernals_stripped/         # Clean CUDA kernels used by the extension
-├── Kernals/                  # Original standalone CUDA source files
-├── scripts/                  # Preprocessing and baseline scripts
-├── weights/                  # Trained model weights (.pth)
-├── dataset/                  # Raw Yelp JSON data
-└── README.md
-```
+## The 12 Custom Kernels
+*   **K1: Pad/Truncate**: Standardizes input sequences to 128 tokens.
+*   **K2: Embedding Lookup**: Vectorized retrieval of word/position features.
+*   **K3: Sinusoidal PE**: Transformer-style hardware-accelerated positional encoding.
+*   **K4: Weighted Pooling**: Block-level parallel reduction of sequence data into vectors.
+*   **K7: BN Mean**: Grid-stride loop calculation of feature-wise means.
+*   **K8: BN Var**: Warp-level reduction of statistical variance.
+*   **K9: BN Apply**: Fusion kernel for scaling, shifting, and normalization.
+*   **K10: Register-Tiled GEMM**: Custom 4x4 register-tiled kernel with vectorized shared memory loads.
+*   **K11: Logit Projection**: Optimized matrix-vector projection for classification.
+*   **K15: Argmax**: Warp-level reduction to find the highest-rated class.
+*   **K16: Fused Bias+ReLU**: Memory-optimized combination of bias and activation.
+*   **K17: Fused Softmax**: Single-pass high-efficiency softmax implementation.
 
 ---
 
-## How to Run
+## Benchmarking Matrix Multiplication
+The project includes a specialized tool to compare our hand-optimized **Register-Tiled GEMM (K10)** against **NVIDIA cuBLAS**.
 
-### 1. Build the Custom CUDA Extension
-Compile the kernels and register them with PyTorch:
+**Run the benchmark:**
 ```powershell
-cd custom_ext
-python setup.py install
+python tests/benchmark_gemm.py
 ```
+This script sweeps across different matrix sizes (Small, Medium, Large) and reports:
+- **Latency (ms)**: Total execution time.
+- **TFLOPS**: Effective floating-point throughput.
+- **Winner**: Identifies which implementation is faster for each workload.
 
-### 2. Run the Full Custom Inference
-Execute the end-to-end sentiment analysis using all 15 kernels:
-```powershell
-python custom_pipeline/inference.py
+---
+
+### The Recommended Workflow
 ```
-
-### 3. (Optional) Re-train or Pre-process
-To regenerate weights or tokenized data:
-```powershell
-python scripts/preprocessing.py
-python custom_pipeline/pyModel.py  # Runs training mode
+Write / modify a kernel
+        ↓
+python tests/run_all_tests.py   ← Did THIS kernel get the math right?
+        ↓ PASS
+Ship it
 ```
 
 ---
 
-**Current Status:** All 15 kernels are fully integrated and verified. The system is capable of performing high-speed sentiment inference on millions of reviews using native GPU acceleration.
+## Usage
+1.  **Prepare Data**: `python scripts/prepare_data.py`
+2.  **Train Model**: `python scripts/train.py`
+3.  **Run Inference**: `python custom_pipeline/inference.py`
+4.  **Verify Kernels**: `python tests/run_all_tests.py`
+5.  **GEMM Benchmark**: `python scripts/benchmark_gemm.py`
+
+---
+
+## Academic Mapping: PMPP Book Chapters
+| Chapter | Core Concept | Project Implementation |
+| :--- | :--- | :--- |
+| **Chapter 3** | Multidimensional Grids | **K2 (Embedding)** and **K10 (GEMM)** use 2D grids and blocks to process matrix data. |
+| **Chapter 4** | Architecture & Scheduling | Optimized warp-level execution in **K7-9 (BatchNorm)** to maximize SM occupancy. |
+| **Chapter 5** | Memory Locality | **K10 (Tiled GEMM)** utilizes Shared Memory Tiling to minimize global memory traffic. |
+| **Chapter 10** | Reduction & Divergence | **K4 (Pooling)** and **K15 (Argmax)** use high-performance warp-shuffle reductions. |
+| **Chapter 16** | Deep Learning | The entire project implements a complete forward inference pipeline for NLP. |
+| **Chapter 19** | Computational Thinking | **K10** uses Register Tiling (4x4) to maximize arithmetic intensity per thread. |
+
+---

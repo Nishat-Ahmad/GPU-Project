@@ -1,22 +1,23 @@
-#include <cuda_runtime.h>
-#include <iostream>
-#include <vector>
-#include <cmath>
+#include "common.h"
 
-// Minimal CUDA error checking for fast feedback during kernel development.
-#define CUDA_CHECK(call)                                                   \
-    do {                                                                   \
-        cudaError_t err = (call);                                          \
-        if (err != cudaSuccess) {                                          \
-            std::cerr << "CUDA error: " << cudaGetErrorString(err)         \
-                      << " at " << __FILE__ << ":" << __LINE__ << "\n"; \
-            std::exit(1);                                                  \
-        }                                                                  \
-    } while (0)
+/**
+ * Kernel 10: Advanced Register-Tiled GEMM (C = A * B)
+ * --------------------------------------------------
+ * This implementation uses thread-level register tiling (4x4) and shared 
+ * memory tiling (64x64) to achieve high occupancy and arithmetic intensity.
+ * 
+ * Performance features:
+ * 1. Register Tiling: Each thread calculates 16 output elements in registers.
+ * 2. Shared Memory: Cooperative loading to reduce global memory traffic.
+ * 3. Loop Unrolling: Pragma unroll for reduced branch overhead.
+ */
 
-// Kernel 10: tiled GEMM C = A * B
-// A: [M x K], B: [K x N], C: [M x N]
-constexpr int TILE = 16;
+// Tiling Configuration
+const int BM = 64; // Block height in A and C
+const int BN = 64; // Block width in B and C
+const int BK = 8;  // K-dimension tile size
+const int TM = 4;  // Elements per thread (row)
+const int TN = 4;  // Elements per thread (col)
 
 __global__ void gemm_tiled_kernel(const float* __restrict__ A,
                                   const float* __restrict__ B,
@@ -24,125 +25,88 @@ __global__ void gemm_tiled_kernel(const float* __restrict__ A,
                                   int M,
                                   int K,
                                   int N) {
-    int row = blockIdx.y * TILE + threadIdx.y;
-    int col = blockIdx.x * TILE + threadIdx.x;
+    // 1. Static Allocation
+    __shared__ float As[BM][BK];
+    __shared__ float Bs[BK][BN];
 
-    __shared__ float As[TILE][TILE];
-    __shared__ float Bs[TILE][TILE];
+    float accum[TM][TN] = {0.0f};
 
-    float sum = 0.0f;
+    // Thread/Block indices
+    int tx = threadIdx.x; // range [0, 15]
+    int ty = threadIdx.y; // range [0, 15]
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
 
-    // Loop over tiles of K.
-    for (int t = 0; t < (K + TILE - 1) / TILE; ++t) {
-        int a_col = t * TILE + threadIdx.x;
-        int b_row = t * TILE + threadIdx.y;
-
-        if (row < M && a_col < K) {
-            As[threadIdx.y][threadIdx.x] = A[row * K + a_col];
-        } else {
-            As[threadIdx.y][threadIdx.x] = 0.0f;
+    // 2. Iterate over the K dimension in blocks of BK
+    for (int k_offset = 0; k_offset < K; k_offset += BK) {
+        int tid = ty * 16 + tx;
+        
+        // 2. Cooperative Load from A -> As (64x8 tile)
+        // 256 threads load 512 elements (2 elements per thread)
+        #pragma unroll
+        for (int i = 0; i < 2; ++i) {
+            int tid_ext = tid + i * 256;
+            int a_inner_row = tid_ext / BK;
+            int a_inner_col = tid_ext % BK;
+            int a_global_row = by * BM + a_inner_row;
+            int a_global_col = k_offset + a_inner_col;
+            
+            if (a_global_row < M && a_global_col < K)
+                As[a_inner_row][a_inner_col] = A[a_global_row * K + a_global_col];
+            else
+                As[a_inner_row][a_inner_col] = 0.0f;
         }
 
-        if (b_row < K && col < N) {
-            Bs[threadIdx.y][threadIdx.x] = B[b_row * N + col];
-        } else {
-            Bs[threadIdx.y][threadIdx.x] = 0.0f;
+        // 3. Cooperative Load from B -> Bs (8x64 tile)
+        // 256 threads load 512 elements (2 elements per thread)
+        #pragma unroll
+        for (int i = 0; i < 2; ++i) {
+            int tid_ext = tid + i * 256;
+            int b_inner_row = tid_ext / BN;
+            int b_inner_col = tid_ext % BN;
+            int b_global_row = k_offset + b_inner_row;
+            int b_global_col = bx * BN + b_inner_col;
+
+            if (b_global_row < K && b_global_col < N)
+                Bs[b_inner_row][b_inner_col] = B[b_global_row * N + b_global_col];
+            else
+                Bs[b_inner_row][b_inner_col] = 0.0f;
         }
 
         __syncthreads();
 
-        // Multiply the two tiles.
-        for (int k = 0; k < TILE; ++k) {
-            sum += As[threadIdx.y][k] * Bs[k][threadIdx.x];
-        }
+        // 3. Compute 4x4 tile per thread using registers
+        #pragma unroll
+        for (int k = 0; k < BK; ++k) {
+            float a_frag[TM];
+            float b_frag[TN];
 
-        __syncthreads();
-    }
+            #pragma unroll
+            for (int i = 0; i < TM; ++i) a_frag[i] = As[ty * TM + i][k];
+            #pragma unroll
+            for (int j = 0; j < TN; ++j) b_frag[j] = Bs[k][tx * TN + j];
 
-    if (row < M && col < N) {
-        C[row * N + col] = sum;
-    }
-}
-
-static void cpu_gemm(const std::vector<float>& A,
-                     const std::vector<float>& B,
-                     std::vector<float>& C,
-                     int M,
-                     int K,
-                     int N) {
-    for (int i = 0; i < M; ++i) {
-        for (int j = 0; j < N; ++j) {
-            float sum = 0.0f;
-            for (int k = 0; k < K; ++k) {
-                sum += A[i * K + k] * B[k * N + j];
+            #pragma unroll
+            for (int i = 0; i < TM; ++i) {
+                #pragma unroll
+                for (int j = 0; j < TN; ++j) {
+                    accum[i][j] += a_frag[i] * b_frag[j];
+                }
             }
-            C[i * N + j] = sum;
+        }
+        __syncthreads();
+    }
+
+    // 4. Store results to Global Memory
+    #pragma unroll
+    for (int i = 0; i < TM; ++i) {
+        #pragma unroll
+        for (int j = 0; j < TN; ++j) {
+            int out_row = by * BM + ty * TM + i;
+            int out_col = bx * BN + tx * TN + j;
+            if (out_row < M && out_col < N) {
+                C[out_row * N + out_col] = accum[i][j];
+            }
         }
     }
-}
-
-int main() {
-    // Test config aligned with your pipeline: M=batch, K=64, N=128.
-    const int M = 128;
-    const int K = 64;
-    const int N = 128;
-
-    std::vector<float> h_A(M * K, 0.0f);
-    std::vector<float> h_B(K * N, 0.0f);
-
-    for (int i = 0; i < M * K; ++i) {
-        h_A[i] = 0.001f * static_cast<float>(i % 97);
-    }
-    for (int i = 0; i < K * N; ++i) {
-        h_B[i] = 0.002f * static_cast<float>(i % 89);
-    }
-
-    std::vector<float> h_C(M * N, 0.0f);
-    std::vector<float> h_expected(M * N, 0.0f);
-
-    cpu_gemm(h_A, h_B, h_expected, M, K, N);
-
-    float* d_A = nullptr;
-    float* d_B = nullptr;
-    float* d_C = nullptr;
-
-    CUDA_CHECK(cudaMalloc(&d_A, h_A.size() * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_B, h_B.size() * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_C, h_C.size() * sizeof(float)));
-
-    CUDA_CHECK(cudaMemcpy(d_A, h_A.data(), h_A.size() * sizeof(float), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_B, h_B.data(), h_B.size() * sizeof(float), cudaMemcpyHostToDevice));
-
-    dim3 block(TILE, TILE, 1);
-    dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE, 1);
-
-    gemm_tiled_kernel<<<grid, block>>>(d_A, d_B, d_C, M, K, N);
-
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    CUDA_CHECK(cudaMemcpy(h_C.data(), d_C, h_C.size() * sizeof(float), cudaMemcpyDeviceToHost));
-
-    bool ok = true;
-    for (size_t i = 0; i < h_C.size(); ++i) {
-        float diff = std::fabs(h_C[i] - h_expected[i]);
-        if (diff > 1e-3f) {
-            std::cerr << "Mismatch at " << i << ": got " << h_C[i]
-                      << ", expected " << h_expected[i] << "\n";
-            ok = false;
-            break;
-        }
-    }
-
-    if (ok) {
-        std::cout << "Kernel 10 GEMM tiled: PASS\n";
-    } else {
-        std::cout << "Kernel 10 GEMM tiled: FAIL\n";
-    }
-
-    CUDA_CHECK(cudaFree(d_A));
-    CUDA_CHECK(cudaFree(d_B));
-    CUDA_CHECK(cudaFree(d_C));
-
-    return ok ? 0 : 1;
 }
